@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import datetime
 import numpy as np
@@ -143,3 +144,23 @@ def get_inter_matrix(df, config, form='coo'):
     else:
         raise NotImplementedError(f'Sparse matrix format [{form}] has not been implemented...')
 
+
+def load_mappings(dataset):
+    '''
+    get item category mappings
+    '''
+    if dataset == 'ml-1m':
+        genre_to_id_path = 'data/ml-1m/genre_to_id.json'
+        item_to_category_path = 'data/ml-1m/item_to_category.json'
+    elif dataset == 'ml-100k':
+        raise ValueError("Not yet")
+    else:
+        raise ValueError("Unsupported dataset. Please use 'ml-1m' or 'ml-100k'.")
+
+    with open(genre_to_id_path, 'r') as f:
+        genre_to_id = json.load(f)
+    
+    with open(item_to_category_path, 'r') as f:
+        item_to_category = json.load(f)
+    
+    return genre_to_id, item_to_category

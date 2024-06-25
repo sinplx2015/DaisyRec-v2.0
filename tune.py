@@ -9,7 +9,7 @@ from daisy.utils.config import init_seed, init_config, init_logger, param_type_c
 from daisy.utils.metrics import metrics_config
 from daisy.utils.sampler import BasicNegtiveSampler, SkipGramNegativeSampler
 from daisy.utils.dataset import AEDataset, BasicDataset, CandidatesDataset, get_dataloader
-from daisy.utils.utils import get_history_matrix, get_ur, build_candidates_set, ensure_dir, get_inter_matrix
+from daisy.utils.utils import get_history_matrix, get_ur, build_candidates_set, ensure_dir, get_inter_matrix, load_mappings
 
 
 TRIAL_CNT = 0
@@ -78,6 +78,13 @@ if __name__ == '__main__':
             else:
                 raise ValueError(f'Invalid parameter settings for {param}, Current is {param_dict[param]}...')
         
+        '''get mappings when using multiloss '''
+        if config['loss_type'].upper() == 'MULTI':
+            genre_to_id, item_to_category = load_mappings(config['dataset'])
+            config['genre_to_id'] = genre_to_id
+            config['item_to_category'] = item_to_category
+            config['num_categories'] = len(genre_to_id)
+            
         ''' user train set to get validation combinations and build model for each dataset '''
         splitter = ValidationSplitter(config)
         cnt, kpis = 1, []

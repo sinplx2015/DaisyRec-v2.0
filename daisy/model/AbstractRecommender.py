@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from daisy.utils.loss import BPRLoss, TOP1Loss, HingeLoss
+from daisy.utils.loss import BPRLoss, TOP1Loss, HingeLoss, Multi_Loss
 
 
 class AbstractRecommender(nn.Module):
@@ -87,6 +87,8 @@ class AbstractRecommender(nn.Module):
             criterion = HingeLoss()
         elif loss_type.upper() == 'TL':
             criterion = TOP1Loss()
+        elif loss_type.upper() == 'MULTI':
+            criterion = Multi_Loss()
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}...')
 

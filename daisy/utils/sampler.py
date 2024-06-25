@@ -96,7 +96,7 @@ class BasicNegtiveSampler(AbstractSampler):
             point_neg[self.inter_name] = 0
             point_neg = point_neg.explode('neg_set')    
             return np.vstack([point_pos.values, point_neg.values]).astype(np.int32)
-        elif self.loss_type.upper() in ['BPR', 'HL', 'TL']:
+        elif self.loss_type.upper() in ['BPR', 'HL', 'TL', 'MULTI']:
             self.df = self.df[[self.uid_name, self.iid_name, 'neg_set']].explode('neg_set')
             return self.df.values.astype(np.int32)
         else:
