@@ -46,6 +46,10 @@ if __name__ == '__main__':
     ''' Test Process for Metrics Exporting '''
     reader, processor = RawDataReader(config), Preprocessor(config)
     df = reader.get_data()
+    if config['loss_type'].upper() == 'MULTI':
+        # min_rating = df['rating'].min()
+        max_rating = df['rating'].max()
+        df['rating'] = df['rating']  / max_rating 
     df = processor.process(df)
     user_num, item_num = processor.user_num, processor.item_num
 

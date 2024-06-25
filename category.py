@@ -23,7 +23,7 @@ def extract_genre_mapping(movies):
     genre_set = set()
     for genres in movies['Genres']:
         genre_set.update(genres.split('|'))
-    genre_list = sorted(genre_set)
+    genre_list = ['Unknown'] + sorted(genre_set)  
     return {genre: idx for idx, genre in enumerate(genre_list)}
 
 def create_item_to_category_mapping(movies, genre_to_id):
@@ -31,7 +31,10 @@ def create_item_to_category_mapping(movies, genre_to_id):
     for _, row in movies.iterrows():
         movie_id = row['MovieID']
         genres = row['Genres'].split('|')
-        genre_ids = [genre_to_id[genre] for genre in genres]
+        if genres == ['']: 
+            genre_ids = [genre_to_id['Unknown']]
+        else:
+            genre_ids = [genre_to_id[genre] for genre in genres]
         item_to_category[movie_id] = genre_ids
     return item_to_category
 

@@ -16,6 +16,8 @@
   year={2012}
 }
 '''
+import os
+import json
 import torch
 import torch.nn as nn
 
@@ -60,12 +62,19 @@ class MF(GeneralRecommender):
         self.early_stop = config['early_stop']
 
         self.apply(self._init_weight)
+        
+        if self.loss_type.upper() == 'MULTI':
+            genre_to_id_path = os.path.join('data', config['dataset'], 'genre_to_id.json')
+            item_to_category_path = os.path.join('data', config['dataset'], 'item_to_category.json')
+            with open(genre_to_id_path, 'r') as f:
+                self.genre_to_id = json.load(f)
+            with open(item_to_category_path, 'r') as f:
+                self.item_to_category = json.load(f)
 
     def forward(self, user, item):
         embed_user = self.embed_user(user)
         embed_item = self.embed_item(item)
         pred = (embed_user * embed_item).sum(dim=-1)
-
         return pred
 
     def calc_loss(self, batch):
@@ -89,35 +98,45 @@ class MF(GeneralRecommender):
             # loss += self.reg_1 * (self.embed_item(pos_item).norm(p=1) + self.embed_item(neg_item).norm(p=1))
             # loss += self.reg_2 * (self.embed_item(pos_item).norm() + self.embed_item(neg_item).norm())
         elif self.loss_type.upper() == 'MULTI':
-            loss = 0.0            
-            for user, pos_item, neg_item in zip(batch[0], batch[1], batch[2]):
-                user = user.to(self.device)
-                pos_item = pos_item.to(self.device)
-                neg_item = neg_item.to(self.device)
-                
-                pos_pred = self.forward(user, pos_item)
+            users = batch[0].to(self.device)
+            pos_items = batch[1].to(self.device)
+            neg_items = batch[2].to(self.device)
+            pos_preds = self.forward(users, pos_items)
+            neg_preds = self.forward(users, neg_items)
+                        
+            # print(pos_preds)   
+            # Get all item embeddings
+            item_embeddings = self.embed_item(pos_items)
+            item_norms = item_embeddings.norm(dim=1, keepdim=True)
+            normalized_item_embeddings = item_embeddings / item_norms
 
-                # item_embbedings
-                Pi = batch[1].to(self.device)
-                item_embeddings = self.embed_item(Pi)
+            # compute wdiv
+            similarity_matrix = torch.mm(normalized_item_embeddings, normalized_item_embeddings.t())
+            mask = torch.eye(similarity_matrix.size(0), device=self.device).bool()
+            similarity_matrix.masked_fill_(mask, 0)
+            num_items = similarity_matrix.size(0)
+            wdiv = 1 - (2 / (num_items * (num_items - 1))) * similarity_matrix.sum(dim=1)
+            
+            # compute wfair
+            user_embeddings = self.embed_user(users)
+            pos_item_scores = torch.matmul(user_embeddings, item_embeddings.t())
+            pos_item_scores_softplus = torch.log(1 + torch.exp(pos_item_scores) + 1e-8)
+            Pmean = torch.mean(pos_item_scores_softplus, dim=1)
+            # print('pmean:',Pmean)
+            # print('pos_item_scores.size(1):', pos_item_scores.size(1))
+            # print("torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)s):", torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)),dim=1))
+            wfair = (0.63 - (1 / pos_item_scores.size(1)) * torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)), dim=1))/0.63
+            wacc = 1 - (wdiv + wfair) / 2
+            
+            weights = torch.stack([wacc, wdiv, wfair], dim=1)
+            weights = torch.nn.functional.softmax(weights, dim=1)
+            wacc, wdiv, wfair = weights[:, 0], weights[:, 1], weights[:, 2]
+            # total_weight = wacc + wdiv + wfair
+            # wacc = wacc / total_weight
+            # wdiv = wdiv / total_weight
+            # wfair = wfair / total_weight
 
-                # weight_compute
-                wdiv = 1 - 2 / (len(Pi) * (len(Pi) - 1)) * sum(
-                    sum(torch.nn.functional.cosine_similarity(item_embeddings[j].unsqueeze(0), item_embeddings[k].unsqueeze(0), dim=1)
-                        for k in range(j + 1, len(Pi))) for j in range(len(Pi))
-                )
-
-                Pmean = torch.mean(torch.stack([torch.log(1 + torch.exp(torch.matmul(self.embed_user(user), item_embeddings[j].T))) for j in range(len(Pi))]))
-                wfair = 1 - 1 / len(Pi) * sum(
-                    abs(torch.log(1 + torch.exp(torch.matmul(self.embed_user(user), item_embeddings[j].T))) - Pmean)
-                    for j in range(len(Pi))
-                )
-
-                wacc = 1 - (wdiv + wfair) / 2
-
-                # loss_compute
-                neg_pred = self.forward(user, neg_item)
-                loss += self.criterion(pos_pred, neg_pred, wacc, wdiv, wfair)
+            loss = self.criterion(pos_preds, neg_preds, wacc, wdiv, wfair, pos_items, self.genre_to_id, self.item_to_category).sum()
                             
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}')
