@@ -5,3 +5,4 @@ scikit-learn>=1.0.2
 tqdm>=4.31.1
 optuna>=2.10.0
 scipy>=1.5.2
+python tune.py --optimization_metric=ndcg --hyperopt_trail=10 --algo_name=mf --dataset=ml-1m --prepro=5filter --topk=50 --epochs=50 --test_size=0.2 --val_size=0.3 --cand_num=1000 --gpu=0 --init_method=default --optimizer=default --loss_type=MULTI --test_method=tsbr --val_method=tsbr --sample_method=uniform
