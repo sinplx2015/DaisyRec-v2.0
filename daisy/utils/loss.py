@@ -35,54 +35,42 @@ class TOP1Loss(nn.Module):
 class Multi_Loss(nn.Module):
     def __init__(self, epsilon=1e-10):
         super(Multi_Loss, self).__init__()
-        self.epsilon = 1e-8  
+        self.epsilon = epsilon  
     
-    def get_category_probabilities(self, pos_items, genre_to_id, item_to_category):
-        category_counts = {genre_id: 0 for genre_id in genre_to_id.values()}
-        missing_keys = []
-
-        for item in pos_items.cpu().numpy():
-            item_str = str(item)
-            if item_str not in item_to_category:
-                missing_keys.append(item_str)
-                continue
-            genre_ids = item_to_category[item_str]
-            for genre_id in genre_ids:
-                if genre_id in category_counts:
-                    category_counts[genre_id] += 1
-
-        total_count = sum(category_counts.values())
-        if total_count == 0:
-            total_count = 1  # to avoid division by zero
-
-        category_probs = [category_counts.get(genre_id, 0) / total_count for genre_id in range(len(genre_to_id))]
+    def get_category_probabilities(self, pos_items, item_genre_matrix):
+        batch_size = pos_items.size(0)
+        num_genres = item_genre_matrix.size(1)
+        genre_counts = torch.zeros((batch_size, num_genres), device=pos_items.device)        
+        for user_idx, user_items in enumerate(pos_items):
+            genre_counts[user_idx] = item_genre_matrix[user_items].sum(dim=0)
+        category_probs = genre_counts / genre_counts.sum(dim=1, keepdim=True)
+        category_probs[torch.isnan(category_probs)] = 0  
         return category_probs
     
-    def forward(self, pos_score, neg_score, wacc, wdiv, wfair, pos_items, genre_to_id, item_to_category):
-        # print("pos_score shape:", pos_score.shape)  
-        # print("neg_score shape:", neg_score.shape)
-        accuracy_loss = -(self.epsilon + torch.sigmoid(pos_score - neg_score)).log()
+    def forward(self, wacc, wdiv, wfair, pos_items, neg_items, pos_scores, neg_scores, item_genre_matrix):
+        accuracy_loss = -(self.epsilon + torch.sigmoid(pos_scores - neg_scores)).log().sum(dim=1)
         
-        category_probs = self.get_category_probabilities(pos_items, genre_to_id, item_to_category)
-        probabilities = torch.tensor(category_probs, dtype=torch.float32, device=pos_score.device).unsqueeze(0).repeat(pos_score.size(0), 1)
+        category_probs = self.get_category_probabilities(pos_items, item_genre_matrix)
+        probabilities = torch.clamp(category_probs, min=1e-10)
         diversity_loss = -torch.sum(probabilities * torch.log(probabilities + 1e-10), dim=1) 
+
+        # Fairness loss
+        popularity = torch.log(1 + torch.exp(pos_scores) + self.epsilon)
+        mean_popularity = torch.mean(popularity, dim=1, keepdim=True)
+        fairness_loss = torch.sum(torch.abs(popularity - mean_popularity), dim=1)
         
-        # Fairness loss        
-        popularity = torch.log(1 + torch.exp(pos_score) + self.epsilon)
-        mean_popularity = torch.mean(popularity)
-        fairness_loss = torch.abs(popularity - mean_popularity)     
-        
-        # print("wacc:", wacc)
-        # print("wdiv:", wdiv)
-        # print("wfair:", wfair)
-        # print("accuracy_loss:", accuracy_loss)
-        # print("diversity_loss:", diversity_loss)
-        # print("fairness_loss:", fairness_loss) 
+        print("wacc:", wacc)
+        print("wdiv:", wdiv)
+        print("wfair:", wfair)
+        print("accuracy_loss:", accuracy_loss)
+        print("diversity_loss:", diversity_loss)
+        print("fairness_loss:", fairness_loss) 
         
         # Total weighted loss
         total_loss = wacc * accuracy_loss + wdiv * diversity_loss + wfair * fairness_loss
         
-        # print(total_loss.sum())
-        return total_loss.sum()
+        return total_loss
+
+
     
     

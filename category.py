@@ -28,14 +28,25 @@ def extract_genre_mapping(movies):
 
 def create_item_to_category_mapping(movies, genre_to_id):
     item_to_category = {}
+    all_movie_ids = set(range(1, movies['MovieID'].max() + 1))
+    existing_movie_ids = set(movies['MovieID'])
+
+    # Add existing movies
     for _, row in movies.iterrows():
         movie_id = row['MovieID']
         genres = row['Genres'].split('|')
         if genres == ['']: 
             genre_ids = [genre_to_id['Unknown']]
         else:
-            genre_ids = [genre_to_id[genre] for genre in genres]
+            genre_ids = [genre_to_id[genre] for genre in genres if genre in genre_to_id]
         item_to_category[movie_id] = genre_ids
+
+    # Add missing movie IDs with genre 0
+    missing_movie_ids = all_movie_ids - existing_movie_ids
+    for missing_movie_id in missing_movie_ids:
+        item_to_category[missing_movie_id] = [genre_to_id['Unknown']]
+        print(f"MovieID {missing_movie_id} is missing, assigning genre 'Unknown'")
+
     return item_to_category
 
 def save_mapping(mapping, filename):
