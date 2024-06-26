@@ -70,7 +70,7 @@ class MF(GeneralRecommender):
                 self.genre_to_id = json.load(f)
             with open(item_to_category_path, 'r') as f:
                 self.item_to_category = json.load(f)
-
+                
     def forward(self, user, item):
         embed_user = self.embed_user(user)
         embed_item = self.embed_item(item)
@@ -128,16 +128,13 @@ class MF(GeneralRecommender):
             wfair = (0.63 - (1 / pos_item_scores.size(1)) * torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)), dim=1))/0.63
             wacc = 1 - (wdiv + wfair) / 2
             
-            weights = torch.stack([wacc, wdiv, wfair], dim=1)
-            weights = torch.nn.functional.softmax(weights, dim=1)
-            wacc, wdiv, wfair = weights[:, 0], weights[:, 1], weights[:, 2]
-            # total_weight = wacc + wdiv + wfair
-            # wacc = wacc / total_weight
-            # wdiv = wdiv / total_weight
-            # wfair = wfair / total_weight
+            total_weight = wacc + wdiv + wfair
+            wacc = wacc / total_weight
+            wdiv = wdiv / total_weight
+            wfair = wfair / total_weight
 
             loss = self.criterion(pos_preds, neg_preds, wacc, wdiv, wfair, pos_items, self.genre_to_id, self.item_to_category).sum()
-                            
+            # print("loss:", loss )                
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}')
 

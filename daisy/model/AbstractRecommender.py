@@ -118,6 +118,7 @@ class GeneralRecommender(AbstractRecommender):
             current_loss = 0.
             pbar = tqdm(train_loader)
             pbar.set_description(f'[Epoch {epoch:03d}]')
+            batch_idx = 0
             for batch in pbar:
                 self.zero_grad()
                 loss = self.calc_loss(batch)
@@ -129,7 +130,9 @@ class GeneralRecommender(AbstractRecommender):
                 optimizer.step()
 
                 current_loss += loss.item()
-            pbar.set_postfix(loss=current_loss)
+                batch_idx += 1
+                pbar.set_postfix(loss=current_loss / batch_idx)
+            # pbar.set_postfix(loss=current_loss)
 
             self.eval()
             delta_loss = float(current_loss - last_loss)
