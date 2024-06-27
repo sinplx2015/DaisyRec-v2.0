@@ -110,49 +110,50 @@ class MF(GeneralRecommender):
             batch_size = batch[1].shape[0]            
             users = batch[0].to(self.device)
             num_users = users.shape[0]
-            # pos_items = batch[1].to(self.device)
-            # neg_items = batch[2].to(self.device)
 
             # Get all item embeddings
             all_item_embeddings = self.embed_item.weight
             user_embeddings = self.embed_user(users)
             all_scores = torch.matmul(user_embeddings, all_item_embeddings.t())  
 
-            # individual_pos_items
+            # individual_all_items
+            _, topk_all_indices = torch.topk(all_scores, k=all_item_embeddings.shape[0], dim=1)
+            individual_all_items = topk_all_indices  # shape: (num_users, all_items)
+            
             _, topk_pos_indices = torch.topk(all_scores, k=batch_size, dim=1)
-            individual_pos_items = topk_pos_indices  # shape: (num_users, batch_size)
-
+            individual_pos_items = topk_pos_indices   
+            
             # individual_neg_items
             all_scores_neg = -all_scores  
             _, topk_neg_indices = torch.topk(all_scores_neg, k=batch_size, dim=1)
             individual_neg_items = topk_neg_indices  # shape: (num_users, batch_size)
 
-            # Calculate item embeddings for pos and neg items
-            individual_pos_item_embeddings = self.embed_item(individual_pos_items.view(-1))
-            individual_pos_item_embeddings = individual_pos_item_embeddings.view(num_users, batch_size, -1)
+            # Calculate item embeddings for all and neg items
+            individual_all_item_embeddings = self.embed_item(individual_all_items.view(-1))
+            individual_all_item_embeddings = individual_all_item_embeddings.view(num_users, -1, all_item_embeddings.shape[1])
             
             individual_neg_item_embeddings = self.embed_item(individual_neg_items.view(-1))
             individual_neg_item_embeddings = individual_neg_item_embeddings.view(num_users, batch_size, -1)
 
-            # Normalize item embeddings for pos items
-            pos_item_norms = individual_pos_item_embeddings.norm(dim=2, keepdim=True)
-            normalized_pos_item_embeddings = individual_pos_item_embeddings / pos_item_norms
+            # Normalize item embeddings for all items
+            all_item_norms = individual_all_item_embeddings.norm(dim=2, keepdim=True)
+            normalized_all_item_embeddings = individual_all_item_embeddings / all_item_norms
 
             # Normalize item embeddings for neg items
             neg_item_norms = individual_neg_item_embeddings.norm(dim=2, keepdim=True)
             normalized_neg_item_embeddings = individual_neg_item_embeddings / neg_item_norms
 
             # wdiv
-            similarity_matrix = torch.bmm(normalized_pos_item_embeddings, normalized_pos_item_embeddings.transpose(1, 2))
-            mask = torch.eye(batch_size, device=self.device).expand(num_users, batch_size, batch_size).bool()
+            similarity_matrix = torch.bmm(normalized_all_item_embeddings, normalized_all_item_embeddings.transpose(1, 2))
+            mask = torch.eye(all_item_embeddings.shape[0], device=self.device).expand(num_users, all_item_embeddings.shape[0], all_item_embeddings.shape[0]).bool()
             similarity_matrix.masked_fill_(mask, 0)
-            wdiv = 1 - (2 / (batch_size * (batch_size - 1))) * similarity_matrix.sum(dim=2).mean(dim=1)
+            wdiv = 1 - (2 / (all_item_embeddings.shape[0] * (all_item_embeddings.shape[0] - 1))) * similarity_matrix.sum(dim=2).mean(dim=1)
 
             # wfair
-            pos_item_scores = torch.matmul(user_embeddings.unsqueeze(1), individual_pos_item_embeddings.transpose(1, 2)).squeeze(1)
-            pos_item_scores_softplus = torch.log(1 + torch.exp(pos_item_scores) + 1e-10)
-            Pmean = torch.mean(pos_item_scores_softplus, dim=1)
-            wfair = (0.63 - (1 / pos_item_scores.size(1)) * torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)), dim=1)) / 0.63
+            all_item_scores = torch.matmul(user_embeddings.unsqueeze(1), individual_all_item_embeddings.transpose(1, 2)).squeeze(1)
+            all_item_scores_softplus = torch.log(1 + torch.exp(all_item_scores) + 1e-10)
+            Pmean = torch.mean(all_item_scores_softplus, dim=1)
+            wfair = (0.63 - (1 / all_item_scores.size(1)) * torch.sum(torch.abs(all_item_scores_softplus - Pmean.unsqueeze(1)), dim=1)) / 0.63
             wacc = 1 - (wdiv + wfair) / 2
             total_weight = wacc + wdiv + wfair
             wacc = wacc / total_weight
@@ -160,10 +161,10 @@ class MF(GeneralRecommender):
             wfair = wfair / total_weight
 
             # Calculate pos_scores and neg_scores
-            pos_scores = all_scores.gather(1, individual_pos_items)
-            neg_scores = all_scores_neg.gather(1, individual_neg_items)
+            pos_scores = all_scores.gather(1, individual_pos_items)  # shape: (num_users, batch_size)
+            neg_scores = all_scores.gather(1, individual_neg_items)
             
-            loss = self.criterion(wacc, wdiv, wfair, individual_pos_items, individual_neg_items, pos_scores, neg_scores, self.item_genre_matrix).sum()
+            loss = self.criterion(wacc, wdiv, wfair, individual_all_items, individual_neg_items,  all_scores,pos_scores, neg_scores, self.item_genre_matrix).sum()
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}')
 

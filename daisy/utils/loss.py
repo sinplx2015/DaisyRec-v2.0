@@ -47,24 +47,25 @@ class Multi_Loss(nn.Module):
         category_probs[torch.isnan(category_probs)] = 0  
         return category_probs
     
-    def forward(self, wacc, wdiv, wfair, pos_items, neg_items, pos_scores, neg_scores, item_genre_matrix):
+    def forward(self, wacc, wdiv, wfair, all_items, neg_items, all_scores, pos_scores, neg_scores, item_genre_matrix):
         accuracy_loss = -(self.epsilon + torch.sigmoid(pos_scores - neg_scores)).log().sum(dim=1)
         
-        category_probs = self.get_category_probabilities(pos_items, item_genre_matrix)
+        category_probs = self.get_category_probabilities(all_items, item_genre_matrix)
         probabilities = torch.clamp(category_probs, min=1e-10)
         diversity_loss = -torch.sum(probabilities * torch.log(probabilities + 1e-10), dim=1) 
 
         # Fairness loss
-        popularity = torch.log(1 + torch.exp(pos_scores) + self.epsilon)
+        popularity = torch.log(1 + torch.exp(all_scores) + self.epsilon)
         mean_popularity = torch.mean(popularity, dim=1, keepdim=True)
         fairness_loss = torch.sum(torch.abs(popularity - mean_popularity), dim=1)
         
-        print("wacc:", wacc)
-        print("wdiv:", wdiv)
-        print("wfair:", wfair)
-        print("accuracy_loss:", accuracy_loss)
-        print("diversity_loss:", diversity_loss)
-        print("fairness_loss:", fairness_loss) 
+        # print("wacc:", wacc)
+        # print("wdiv:", wdiv)
+        # print("wfair:", wfair)
+        
+        # print("accuracy_loss:", accuracy_loss)
+        # print("diversity_loss:", diversity_loss)
+        # print("fairness_loss:", fairness_loss) 
         
         # Total weighted loss
         total_loss = wacc * accuracy_loss + wdiv * diversity_loss + wfair * fairness_loss
