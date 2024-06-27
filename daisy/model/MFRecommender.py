@@ -164,7 +164,7 @@ class MF(GeneralRecommender):
             pos_scores = all_scores.gather(1, individual_pos_items)  # shape: (num_users, batch_size)
             neg_scores = all_scores.gather(1, individual_neg_items)
             
-            loss = self.criterion(wacc, wdiv, wfair, individual_all_items, individual_neg_items,  all_scores,pos_scores, neg_scores, self.item_genre_matrix).sum()
+            loss = self.criterion(wacc, wdiv, wfair, individual_pos_items, individual_neg_items,  all_scores,pos_scores, neg_scores, self.item_genre_matrix).sum()
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}')
 
