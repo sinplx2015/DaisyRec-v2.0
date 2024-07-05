@@ -7,6 +7,8 @@
   year={2017}
 }
 '''
+import os
+import json
 import torch
 import torch.nn as nn
 
@@ -78,6 +80,17 @@ class NeuMF(GeneralRecommender):
         self.topk = config['topk']
 
         self._init_weight()
+        
+        if self.loss_type.upper() == 'MULTI':
+            genre_to_id_path = os.path.join('data', config['dataset'], 'genre_to_id.json')
+            item_to_category_path = os.path.join('data', config['dataset'], 'item_to_category.json')
+            with open(genre_to_id_path, 'r') as f:
+                self.genre_to_id = json.load(f)
+            with open(item_to_category_path, 'r') as f:
+                self.item_to_category = json.load(f)
+            num_items = len(self.item_to_category)
+            num_genres = len(self.genre_to_id)
+            self.item_genre_matrix = torch.zeros(num_items, num_genres).to(self.device)
 
     def _init_weight(self):
         if not self.model == 'NeuMF-pre':
@@ -159,6 +172,63 @@ class NeuMF(GeneralRecommender):
             loss += self.reg_1 * (self.embed_item_MLP(pos_item).norm(p=1) + self.embed_item_GMF(neg_item).norm(p=1))
             loss += self.reg_2 * (self.embed_item_GMF(pos_item).norm() + self.embed_item_GMF(neg_item).norm())
             loss += self.reg_2 * (self.embed_item_MLP(pos_item).norm() + self.embed_item_GMF(neg_item).norm())
+        elif self.loss_type.upper() == 'MULTI':
+            batch_size = batch[1].shape[0]
+            users = batch[0].to(self.device)
+            num_users = users.shape[0]
+            pos_items = batch[1].to(self.device)
+            neg_items = batch[2].to(self.device)
+
+            all_item_indices = torch.arange(self.embed_item_GMF.weight.size(0)).to(self.device)
+            pos_scores = self.forward(users.unsqueeze(1).repeat(1, all_item_indices.size(0)), all_item_indices)
+            neg_scores = -pos_scores  
+
+            # individual_pos_items
+            _, topk_pos_indices = torch.topk(pos_scores, k=batch_size, dim=1)
+            individual_pos_items = topk_pos_indices  # shape: (num_users, batch_size)
+
+            # individual_neg_items
+            _, topk_neg_indices = torch.topk(neg_scores, k=batch_size, dim=1)
+            individual_neg_items = topk_neg_indices  # shape: (num_users, batch_size)
+
+            # Calculate item embeddings for pos and neg items
+            individual_pos_item_embeddings = self.embed_item_GMF(individual_pos_items.view(-1))
+            individual_pos_item_embeddings = individual_pos_item_embeddings.view(num_users, batch_size, -1)
+            
+            individual_neg_item_embeddings = self.embed_item_GMF(individual_neg_items.view(-1))
+            individual_neg_item_embeddings = individual_neg_item_embeddings.view(num_users, batch_size, -1)
+
+            # Normalize item embeddings for pos items
+            pos_item_norms = individual_pos_item_embeddings.norm(dim=2, keepdim=True)
+            normalized_pos_item_embeddings = individual_pos_item_embeddings / pos_item_norms
+
+            # Normalize item embeddings for neg items
+            neg_item_norms = individual_neg_item_embeddings.norm(dim=2, keepdim=True)
+            normalized_neg_item_embeddings = individual_neg_item_embeddings / neg_item_norms
+
+            # wdiv
+            similarity_matrix = torch.bmm(normalized_pos_item_embeddings, normalized_pos_item_embeddings.transpose(1, 2))
+            mask = torch.eye(batch_size, device=self.device).expand(num_users, batch_size, batch_size).bool()
+            similarity_matrix.masked_fill_(mask, 0)
+            wdiv = 1 - (2 / (batch_size * (batch_size - 1))) * similarity_matrix.sum(dim=2).mean(dim=1)
+
+            # wfair
+            pos_item_scores = self.forward(users.unsqueeze(1).repeat(1, individual_pos_items.size(1)), individual_pos_items)
+            pos_item_scores_softplus = torch.log(1 + torch.exp(pos_item_scores) + 1e-10)
+            Pmean = torch.mean(pos_item_scores_softplus, dim=1)
+            wfair = (0.63 - (1 / pos_item_scores.size(1)) * torch.sum(torch.abs(pos_item_scores_softplus - Pmean.unsqueeze(1)), dim=1)) / 0.63
+            wacc = 1 - (wdiv + wfair) / 2
+            total_weight = wacc + wdiv + wfair
+            wacc = wacc / total_weight
+            wdiv = wdiv / total_weight
+            wfair = wfair / total_weight
+
+            # Calculate pos_scores and neg_scores for individual items
+            pos_scores = pos_scores.gather(1, individual_pos_items)
+            neg_scores = neg_scores.gather(1, individual_neg_items)
+
+            loss = self.criterion(wacc, wdiv, wfair, individual_pos_items, individual_neg_items, pos_scores, neg_scores, self.item_genre_matrix).sum()
+
         else:
             raise NotImplementedError(f'Invalid loss type: {self.loss_type}')
 
